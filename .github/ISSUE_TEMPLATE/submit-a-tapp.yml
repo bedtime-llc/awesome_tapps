@@ -1,0 +1,166 @@
+# The submission form. Filling this in is the whole contributor-facing flow: tools/submit_entry.py
+# turns it into tapps/<id>.json and opens the pull request.
+#
+# Two things here are load-bearing, and tools/issue_form.py --check-form enforces both in CI:
+#
+#   * Every `label:` is a parser key. GitHub renders an issue form as markdown headings of the
+#     visible label and exposes nothing else — not in the webhook, not in the REST API — so the
+#     label text IS the contract. Reword one and the parser stops finding that field.
+#   * The two-space indentation is how --check-form tells a field label (column 6) from a checkbox
+#     option label (column 10). Re-indent this file and the guard stops guarding.
+#
+# `render:` is deliberately absent from every textarea: a blank one then emits an empty code fence
+# instead of `_No response_`, which the parser would read as content rather than as "left blank".
+
+name: Submit a tapp
+description: Add your tapp to the catalog. It gets built, screenshotted and published.
+title: "tapp: "
+labels: ["tapp"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Your tapp stays in **your** repo — this catalog holds a few lines pointing at it.
+
+        Fill this in and a bot pins your code to a commit, writes the catalog entry and opens the
+        pull request. CI then builds it with the current SDK, runs the device loader's own checks,
+        and screenshots it in the emulator so both of us can see what we are shipping.
+
+        Check it builds first, if you can: `./tape_sdk/tapp-build path/to/your/tapp`
+
+  - type: input
+    id: name
+    attributes:
+      label: Name
+      description: Display name, up to 48 characters.
+      placeholder: Drum Machine
+    validations:
+      required: true
+
+  - type: input
+    id: author
+    attributes:
+      label: Author
+      description: Your name or GitHub handle — how you want to be credited on the site.
+      placeholder: "@someone"
+    validations:
+      required: true
+
+  - type: input
+    id: repo
+    attributes:
+      label: Repository
+      description: The public GitHub repo holding your source.
+      placeholder: https://github.com/someone/drum-machine
+    validations:
+      required: true
+
+  - type: input
+    id: ref
+    attributes:
+      label: Version (optional)
+      description: >-
+        A release tag, or a commit sha. Leave it blank and your last commit is used — either way
+        the entry records an exact commit, so what gets reviewed is what gets published.
+      placeholder: v1.0.0
+    validations:
+      required: false
+
+  - type: dropdown
+    id: category
+    attributes:
+      label: Category
+      options:
+        - instrument
+        - effect
+        - utility
+        - game
+        - toy
+    validations:
+      required: true
+
+  - type: input
+    id: description
+    attributes:
+      label: Description
+      description: One line, up to 200 characters. What it does.
+      placeholder: Eight pads, sixteen steps, swing you can feel.
+    validations:
+      required: true
+
+  - type: input
+    id: tags
+    attributes:
+      label: Tags (optional)
+      description: Up to 6, comma separated, lowercase.
+      placeholder: drums, sequencer
+    validations:
+      required: false
+
+  - type: input
+    id: license
+    attributes:
+      label: License (optional)
+      description: Optional, but appreciated.
+      placeholder: MIT
+    validations:
+      required: false
+
+  - type: textarea
+    id: notes
+    attributes:
+      label: Notes (optional)
+      description: Needs a specific SD card layout? Known limitations? Say so here.
+    validations:
+      required: false
+
+  - type: markdown
+    attributes:
+      value: |
+        ---
+        ### Advanced
+
+        Leave the rest blank unless you need it.
+
+  - type: input
+    id: slug
+    attributes:
+      label: Id (optional)
+      description: >-
+        Your tapp's id on the site and in its download URL — lowercase, dashes, permanent.
+        Defaults to your name, slugified.
+      placeholder: drum-machine
+    validations:
+      required: false
+
+  - type: input
+    id: build
+    attributes:
+      label: Build sources (optional)
+      description: >-
+        Name your source files explicitly, for when pointing tapp-build at the repo is not enough —
+        sources spread across subdirectories, say. Paths are relative to your repo root.
+      placeholder: src/app.c src/audio.c
+    validations:
+      required: false
+
+  - type: input
+    id: screenshot_frames
+    attributes:
+      label: Screenshot frames (optional)
+      description: >-
+        Frames to run before the capture, 1 to 600. Default 90, about three seconds. Raise it if
+        your tapp opens on a splash screen.
+      placeholder: "180"
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: confirmations
+    attributes:
+      label: Confirmations
+      options:
+        - label: The repository is public and the code is mine to publish
+          required: true
+        - label: It builds with the current SDK
+          required: true

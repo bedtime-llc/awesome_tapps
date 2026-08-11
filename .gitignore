@@ -1,0 +1,10 @@
+# Build output. Nothing generated belongs in this repo — it is a registry, not an artifact store.
+#
+# The emulator is deliberately NOT listed here. It used to be staged in .emu/, and a gitignore rule
+# meant a hand-copied local build could sit there indefinitely without showing up in `git status`,
+# disagreeing with the deployed one that CI uses. tools/fetch-emu.mjs now resolves it into the OS
+# cache dir instead, so there is no in-repo path to place one into — and if someone does, it is
+# visible.
+out/
+__pycache__/
+.DS_Store

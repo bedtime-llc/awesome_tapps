@@ -1,0 +1,133 @@
+name: validate
+
+# No `paths:` filter, deliberately. `gate` below is a required check, and a required check on a
+# path-filtered workflow never reports at all on a PR that touches nothing it matches — the PR then
+# sits at "Expected — waiting for status" forever. The `changed` job decides what to build instead.
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: validate-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+env:
+  SDK_REF: main
+
+jobs:
+  tools:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Unit tests
+        run: python3 -m unittest discover -s tools -p 'test_*.py' -v
+
+      # The issue form is parsed by its visible labels, because GitHub exposes nothing else. This
+      # is what turns "someone reworded a label and license silently went blank" into a red build.
+      - name: Issue form matches the parser
+        run: python3 tools/issue_form.py --check-form .github/ISSUE_TEMPLATE/submit-a-tapp.yml
+
+  changed:
+    runs-on: ubuntu-latest
+    outputs:
+      entries: ${{ steps.list.outputs.entries }}
+      any: ${{ steps.list.outputs.any }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: List changed entries
+        id: list
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          # Added or modified only: a PR that deletes an entry has nothing to build.
+          # Via a file, not an array: an empty `printf '%s\n' "${arr[@]}"` still emits one blank
+          # line, which would turn "nothing changed" into a matrix entry of "".
+          : > changed.txt
+          git diff --name-only --diff-filter=AM "$BASE" "$HEAD" -- 'tapps/*.json' > changed.txt || true
+          cat changed.txt
+          echo "entries=$(jq -R . < changed.txt | jq -sc .)" >> "$GITHUB_OUTPUT"
+          echo "any=$([ -s changed.txt ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+
+  validate:
+    needs: changed
+    if: needs.changed.outputs.any == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        entry: ${{ fromJSON(needs.changed.outputs.entries) }}
+    # `matrix.entry` is a filename off a fork's diff, and git permits a quote in one. Every use of
+    # it goes through env: — a `${{ }}` inside a run: script is substituted before the shell parses,
+    # so `tapps/a'$(id)'.json` would execute out of what looks like a quoted string.
+    env:
+      ENTRY: ${{ matrix.entry }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Derive slug
+        id: meta
+        run: echo "slug=$(basename "$ENTRY" .json)" >> "$GITHUB_OUTPUT"
+
+      - name: Validate entry
+        run: python3 tools/entry.py --check "$ENTRY"
+
+      - name: Install toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends clang lld llvm imagemagick
+
+      - name: Build
+        run: python3 tools/build_entry.py "$ENTRY" --out out --sdk-ref "$SDK_REF"
+
+      - name: Fetch emulator
+        run: node tools/fetch-emu.mjs
+
+      - name: Screenshot
+        env:
+          SLUG: ${{ steps.meta.outputs.slug }}
+        run: |
+          FRAMES=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['screenshot_frames'])" \
+                   "out/$SLUG.build.json")
+          node tools/screenshot.mjs "out/$SLUG.tapp" "out/$SLUG.png" "$FRAMES"
+
+      - name: Summary
+        if: always()
+        env:
+          SLUG: ${{ steps.meta.outputs.slug }}
+        run: python3 tools/summary.py "out/$SLUG.build.json" >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ${{ steps.meta.outputs.slug }}
+          path: |
+            out/${{ steps.meta.outputs.slug }}.tapp
+            out/${{ steps.meta.outputs.slug }}.png
+            out/${{ steps.meta.outputs.slug }}.build.json
+          if-no-files-found: warn
+
+  # The one required status check. A matrix job cannot be required by name — `validate (tapps/x.json)`
+  # changes with every entry — so branch protection points here instead. It also catches the case
+  # this whole workflow is most likely to fail at silently: a bot-opened PR where no build ever ran.
+  gate:
+    needs: [tools, changed, validate]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          TOOLS: ${{ needs.tools.result }}
+          CHANGED: ${{ needs.changed.result }}
+          VALIDATE: ${{ needs.validate.result }}
+        run: |
+          echo "tools=$TOOLS changed=$CHANGED validate=$VALIDATE"
+          [ "$TOOLS" = success ] || exit 1
+          [ "$CHANGED" = success ] || exit 1
+          # skipped is the honest answer for a PR that touches no entry.
+          case "$VALIDATE" in success|skipped) ;; *) exit 1 ;; esac

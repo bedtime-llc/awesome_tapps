@@ -1,0 +1,192 @@
+name: submit
+
+# Turns a submission issue into a pull request. The contributor fills in the form; everything from
+# there to a reviewable PR — resolving the commit, writing tapps/<id>.json, opening the branch — is
+# this workflow's job.
+#
+# Two jobs, because they need very different amounts of trust:
+#
+#   check    runs for anyone, on every edit. Parses attacker-controlled text. No secrets, no repo
+#            write, no compiler. Comments back within about twenty seconds.
+#   open-pr  runs only once a maintainer applies `tapp:approved`. Holds the token, and never reads
+#            the raw issue body — it commits a file that `check` already parsed and validated.
+#
+# The label gate is not bureaucracy. A stranger's fork PR hits GitHub's "require approval for
+# first-time contributors" wall before Actions will compile anything; the PR this workflow opens is
+# a *same-repo* PR and sails straight past that wall. Without the gate, filing an issue would be a
+# way to make CI clone and compile arbitrary C on demand.
+
+on:
+  issues:
+    types: [opened, edited, labeled]
+  workflow_dispatch:
+    inputs:
+      issue:
+        description: 'Issue number to re-process, e.g. 12'
+        required: true
+
+permissions: {}
+
+concurrency:
+  group: submit-${{ github.event.issue.number || inputs.issue }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    # The form applies `tapp` on creation and non-collaborators cannot add labels, so this ignores
+    # every issue that is not a submission without having to parse it first.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      contains(github.event.issue.labels.*.name, 'tapp')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write        # GITHUB_TOKEN, for the one comment this leaves
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      ISSUE_NUMBER: ${{ github.event.issue.number || inputs.issue }}
+    outputs:
+      ok: ${{ steps.parse.outputs.ok }}
+      slug: ${{ steps.parse.outputs.slug }}
+      verb: ${{ steps.parse.outputs.verb }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read the issue
+        id: issue
+        run: |
+          # Fetched rather than read out of the event payload, so a workflow_dispatch re-run and an
+          # edit see the same thing: the issue as it stands now.
+          gh issue view "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --json body,author > issue.json
+          jq -r '.body // ""'         issue.json > issue-body.md
+          jq -r '.author.login // ""' issue.json > issue-user.txt
+          echo "user=$(cat issue-user.txt)" >> "$GITHUB_OUTPUT"
+
+      - name: Parse the submission
+        id: parse
+        continue-on-error: true
+        # The body never reaches a shell as code. A `${{ }}` inside a run: is substituted before
+        # the shell parses the line, so an issue containing $(…) would execute; read from a file
+        # into an environment variable, it is only ever data.
+        env:
+          ISSUE_USER: ${{ steps.issue.outputs.user }}
+        run: |
+          mkdir -p stage
+          ISSUE_BODY="$(cat issue-body.md)" \
+            python3 tools/submit_entry.py \
+              --catalog tapps --out stage \
+              --report stage/report.md --pr-body stage/pr-body.md
+
+      - name: Comment the result
+        run: |
+          # Upsert, keyed by the sentinel in the body: someone fixing three typos should end up
+          # with one accurate comment, not four stale ones.
+          ID=$(gh api "repos/$GITHUB_REPOSITORY/issues/$ISSUE_NUMBER/comments" --paginate \
+               --jq '.[] | select(.body | contains("<!-- tapps-bot:submit -->")) | .id' | head -1)
+          if [ -n "$ID" ]; then
+            gh api --method PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$ID" \
+                   -F body=@stage/report.md --silent
+          else
+            gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" \
+                             --body-file stage/report.md
+          fi
+
+      - name: Stash the entry for the pull request
+        if: steps.parse.outputs.ok == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: entry-${{ steps.parse.outputs.slug }}
+          path: stage/
+          if-no-files-found: error
+
+      - name: Say so if the bot itself broke
+        if: failure()
+        env:
+          RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          # Without this a broken bot is silent: a failed run on an `issues` event notifies nobody,
+          # and the contributor waits on a comment that is never coming.
+          gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" \
+                        --add-label 'tapp:bot-error' || true
+          gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body \
+            "The submission bot hit an internal error — nothing to fix on your end. A maintainer will take a look: $RUN"
+
+  open-pr:
+    needs: check
+    if: >-
+      needs.check.outputs.ok == 'true' &&
+      (github.event_name == 'workflow_dispatch' ||
+       (github.event.action == 'labeled' && github.event.label.name == 'tapp:approved') ||
+       (github.event.action == 'edited' &&
+        contains(github.event.issue.labels.*.name, 'tapp:approved')))
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    env:
+      # A PR opened by GITHUB_TOKEN triggers no `pull_request` run — GitHub's recursion guard — so
+      # validate.yml would never build it and `gate` would never report. Repo settings separately
+      # block GITHUB_TOKEN from opening PRs at all unless that is switched on. A PAT avoids both.
+      # The fallback keeps a missing token from being quietly fatal: the PR still opens, and the
+      # last step says out loud that its checks have to be started by hand.
+      GH_TOKEN: ${{ secrets.SUBMIT_PAT || secrets.GITHUB_TOKEN }}
+      HAVE_PAT: ${{ secrets.SUBMIT_PAT != '' }}
+      SLUG: ${{ needs.check.outputs.slug }}
+      VERB: ${{ needs.check.outputs.verb }}
+      ISSUE: ${{ github.event.issue.number || inputs.issue }}
+      BASE: ${{ github.event.repository.default_branch }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.SUBMIT_PAT || secrets.GITHUB_TOKEN }}
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: entry-${{ needs.check.outputs.slug }}
+          path: stage
+
+      - name: Push the branch
+        run: |
+          # One branch per tapp, force-pushed, mirroring publish.yml's dev-tapps-<slug>: an edited
+          # submission refreshes its pull request instead of leaving a trail of abandoned ones.
+          # Rebuilt from the base branch every time, so it never carries a stale commit.
+          git config user.name  "tapps-bot"
+          git config user.email "actions@github.com"
+          git checkout -q -B "submit/$SLUG" "origin/$BASE"
+          cp "stage/$SLUG.json" "tapps/$SLUG.json"
+          git add "tapps/$SLUG.json"
+          if git diff --staged --quiet; then
+            echo "tapps/$SLUG.json already says exactly this — nothing to push."
+            echo "changed=false" >> "$GITHUB_ENV"
+            exit 0
+          fi
+          git commit -q -m "tapps: $VERB $SLUG"
+          git push -f -q origin "HEAD:submit/$SLUG"
+          echo "changed=true" >> "$GITHUB_ENV"
+
+      - name: Open or refresh the pull request
+        if: env.changed == 'true'
+        run: |
+          N=$(gh pr list --repo "$GITHUB_REPOSITORY" --head "submit/$SLUG" --state open \
+                         --json number --jq '.[0].number // empty')
+          if [ -z "$N" ]; then
+            gh pr create --repo "$GITHUB_REPOSITORY" --base "$BASE" --head "submit/$SLUG" \
+                         --title "tapps: $VERB $SLUG" --body-file stage/pr-body.md
+          else
+            # Two submissions racing for one id would otherwise silently overwrite each other.
+            if ! gh pr view "$N" --repo "$GITHUB_REPOSITORY" --json body --jq '.body' \
+                 | grep -qE "Closes #$ISSUE([^0-9]|$)"; then
+              echo "::error::pull request #$N already claims the id '$SLUG' for another issue."
+              exit 1
+            fi
+            gh pr edit "$N" --repo "$GITHUB_REPOSITORY" \
+                        --title "tapps: $VERB $SLUG" --body-file stage/pr-body.md
+          fi
+
+      - name: Note when the checks will not start on their own
+        if: env.changed == 'true' && env.HAVE_PAT != 'true'
+        run: |
+          gh pr comment "submit/$SLUG" --repo "$GITHUB_REPOSITORY" --body \
+            "No \`SUBMIT_PAT\` is configured, so GITHUB_TOKEN opened this pull request and its checks will not start on their own. Close and reopen it to run them." || true

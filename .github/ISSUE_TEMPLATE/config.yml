@@ -1,0 +1,17 @@
+# Blank issues stay on: this repo is also where a broken entry or a bad build gets reported, and
+# that has nowhere else to go. Only the submission form applies the `tapp` label, so submit.yml
+# ignores everything else by construction.
+blank_issues_enabled: true
+contact_links:
+  - name: Write a tapp
+    url: https://github.com/bedtime-llc/tape_sdk
+    about: The SDK, and tapp-build. Start here if you have not written one yet.
+  - name: API reference
+    url: https://sdk.b.edti.me
+    about: Every symbol the firmware exports.
+  - name: Build one in your browser
+    url: https://tapp.b.edti.me
+    about: The same compiler CI uses, without installing anything.
+  - name: Browse the catalog
+    url: https://b.edti.me/projects/tape/tapps/
+    about: Everything published so far.

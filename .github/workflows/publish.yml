@@ -1,0 +1,143 @@
+name: publish
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'tapps/*.json'
+  workflow_dispatch:
+    inputs:
+      entry:
+        description: 'Entry to republish, e.g. tapps/tapeboy.json'
+        required: true
+
+permissions:
+  contents: read
+
+env:
+  SDK_REF: main
+  WEB_REPO: itsyourbedtime/bedtime_web
+
+jobs:
+  changed:
+    runs-on: ubuntu-latest
+    outputs:
+      entries: ${{ steps.list.outputs.entries }}
+      any: ${{ steps.list.outputs.any }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: List entries to publish
+        id: list
+        # Every one of these is attacker- or typo-controlled text, and a `${{ }}` in a run: script
+        # is substituted before the shell parses it. They go through env: so they stay data.
+        env:
+          INPUT_ENTRY: ${{ github.event.inputs.entry }}
+          BEFORE: ${{ github.event.before }}
+          SHA: ${{ github.sha }}
+        run: |
+          : > changed.txt
+          if [ -n "$INPUT_ENTRY" ]; then
+            printf '%s\n' "$INPUT_ENTRY" > changed.txt
+          else
+            # A push event's "before" is the previous tip of main, so this is the set the merge
+            # actually introduced.
+            git diff --name-only --diff-filter=AM \
+              "$BEFORE" "$SHA" -- 'tapps/*.json' > changed.txt || true
+          fi
+          cat changed.txt
+          echo "entries=$(jq -R . < changed.txt | jq -sc .)" >> "$GITHUB_OUTPUT"
+          echo "any=$([ -s changed.txt ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+
+  publish:
+    needs: changed
+    if: needs.changed.outputs.any == 'true'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: publish-web
+      cancel-in-progress: false
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        entry: ${{ fromJSON(needs.changed.outputs.entries) }}
+    env:
+      ENTRY: ${{ matrix.entry }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Derive slug
+        id: meta
+        run: echo "slug=$(basename "$ENTRY" .json)" >> "$GITHUB_OUTPUT"
+
+      - name: Install toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends clang lld llvm imagemagick
+
+      - name: Build
+        run: python3 tools/build_entry.py "$ENTRY" --out out --sdk-ref "$SDK_REF"
+
+      - name: Fetch emulator
+        run: node tools/fetch-emu.mjs
+
+      - name: Screenshot
+        env:
+          SLUG: ${{ steps.meta.outputs.slug }}
+        run: |
+          FRAMES=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['screenshot_frames'])" \
+                   "out/$SLUG.build.json")
+          node tools/screenshot.mjs "out/$SLUG.tapp" "out/$SLUG.png" "$FRAMES"
+
+      - name: Checkout website
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.WEB_REPO }}
+          ref: main
+          token: ${{ secrets.PRIV_PAT }}
+          path: web
+
+      - name: Stage into the website
+        env:
+          SLUG: ${{ steps.meta.outputs.slug }}
+        run: python3 tools/publish_web.py --web-root web "out/$SLUG.build.json"
+
+      - name: Push branch and open PR
+        working-directory: web
+        env:
+          GH_TOKEN: ${{ secrets.PRIV_PAT }}
+          SLUG: ${{ steps.meta.outputs.slug }}
+          THIS_REPO: ${{ github.repository }}
+        run: |
+          # Branch keyed by slug, like the artifact filename: one tapp has at most one open PR, and
+          # a re-publish force-pushes over it rather than leaving a trail of stale branches.
+          BRANCH="dev-tapps-${SLUG}"
+          git config user.name  "tapps-bot"
+          git config user.email "actions@github.com"
+          git checkout -b "$BRANCH"
+          git add "static/downloads/tapps/${SLUG}.tapp" \
+                  "static/images/tape/tapps/${SLUG}.png" \
+                  data/tapps.json
+          if git diff --staged --quiet; then
+            echo "Nothing changed for ${SLUG} — the published build is already current."
+            exit 0
+          fi
+          git commit -m "tapps: publish ${SLUG}"
+          git push -f origin "HEAD:${BRANCH}"
+
+          REPO=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['repo'])" \
+                 "../out/${SLUG}.build.json")
+          if [ -z "$(gh pr list -R "$WEB_REPO" --head "$BRANCH" --json number -q '.[0].number')" ]; then
+            gh pr create -R "$WEB_REPO" --base main --head "$BRANCH" \
+              --title "tapps: publish ${SLUG}" \
+              --body "Built by [awesome_tapps](https://github.com/${THIS_REPO}) from \`${SLUG}\`.
+
+          Source: ${REPO}
+
+          Check the Cloudflare preview of \`/projects/tape/tapps/\` — the card, the screenshot and the download link — then merge."
+          else
+            echo "PR for $BRANCH already exists; refreshed by the force-push."
+          fi
+          echo "Preview: https://${BRANCH//./-}.bedtime-web.pages.dev/projects/tape/tapps/"

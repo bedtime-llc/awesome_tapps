@@ -1,7 +1,4 @@
-# Blank issues stay on: this repo is also where a broken entry or a bad build gets reported, and
-# that has nowhere else to go. Only the submission form applies the `tapp` label, so submit.yml
-# ignores everything else by construction.
-blank_issues_enabled: true
+blank_issues_enabled: false
 contact_links:
   - name: Write a tapp
     url: https://github.com/bedtime-llc/tape_sdk

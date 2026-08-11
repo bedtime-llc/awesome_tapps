@@ -84,7 +84,6 @@ body:
     attributes:
       label: Description
       description: One line, up to 200 characters. What it does.
-      placeholder: Eight pads, sixteen steps, swing you can feel.
     validations:
       required: true
 

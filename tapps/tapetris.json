@@ -1,0 +1,8 @@
+{
+  "name": "tapetris",
+  "author": "itsyourbedtime",
+  "repo": "https://github.com/itsyourbedtime/tapetris",
+  "ref": "15b0ae6cc03304057f93c0517e8b197aca25c038",
+  "category": "game",
+  "description": "tetris with physics"
+}

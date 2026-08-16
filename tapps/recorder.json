@@ -1,0 +1,13 @@
+{
+  "name": "recorder",
+  "author": "bedtime-llc",
+  "repo": "https://github.com/bedtime-llc/tape_sdk",
+  "ref": "2cd06a03b2cc2d158687075e8a6dadbf65652bf3",
+  "category": "utility",
+  "description": "simple recorder example",
+  "tags": [
+    "recorder"
+  ],
+  "license": "MIT",
+  "build": "examples/recorder.c"
+}

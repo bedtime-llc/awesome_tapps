@@ -1,0 +1,13 @@
+{
+  "name": "infinigroove",
+  "author": "bedtime-llc",
+  "repo": "https://github.com/bedtime-llc/tape_sdk",
+  "ref": "11901f7ac8e92d5e28cd1cd90cddd02bc23337a4",
+  "category": "instrument",
+  "description": "generative groovebox example",
+  "tags": [
+    "drums",
+    "sequencer"
+  ],
+  "build": "examples/infinigroove.c"
+}

@@ -41,7 +41,7 @@ published.
 | Author | required | Your name or GitHub handle |
 | Repository | required | Public GitHub URL |
 | Version | optional | A release tag or a commit sha. Blank uses your last commit |
-| Category | required | `instrument`, `effect`, `utility`, `game` or `toy` |
+| Category | required | One or more of `instrument`, `source`, `effect`, `utility`, `game` |
 | Description | required | One line, max 200 chars |
 | Tags | optional | Up to 6, comma separated, lowercase |
 | License | optional | e.g. `MIT` |
@@ -55,6 +55,23 @@ published.
 Submit the form again with the same **Id**, or edit your original issue. The bot refreshes the same
 pull request. The download URL never changes, so existing links keep working.
 
+### Hand-writing an entry
+
+You do not need this — it is how the bot's output is shaped, and how a maintainer fixes a typo.
+An entry is one JSON file, `tapps/<id>.json`:
+
+```json
+{
+  "name": "Drum Machine",
+  "author": "someone",
+  "repo": "https://github.com/someone/drum-machine",
+  "ref": "v1.2.0",
+  "category": ["instrument", "source"],
+  "description": "Eight pads, sixteen steps.",
+  "tags": ["drums", "sequencer"],
+  "license": "MIT"
+}
+```
 
 Only `name`, `author`, `repo`, `category` and `description` are required. `ref` may be a tag or a
 40-character sha; leave it out and the build takes the repo's default branch, recording whichever

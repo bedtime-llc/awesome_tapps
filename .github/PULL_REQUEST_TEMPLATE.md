@@ -12,7 +12,7 @@ edit the file directly. One JSON file, `tapps/<id>.json`, and nothing else — n
   "author": "Your name or GitHub handle",
   "repo": "https://github.com/you/your-tapp",
   "ref": "v1.0.0",
-  "category": "instrument",
+  "category": ["instrument", "source"],
   "description": "One line, max 200 characters. What it does.",
   "tags": ["drums", "sequencer"],
   "license": "MIT"
@@ -22,7 +22,7 @@ edit the file directly. One JSON file, `tapps/<id>.json`, and nothing else — n
 - The filename without `.json` is your tapp's id on the site: lowercase, dashes, permanent.
 - **`ref`** is optional — a release tag, or a 40-character commit sha. Leave it out and the build
   takes the repo's default branch, recording whichever commit that turned out to be.
-- **`category`** is one of `instrument`, `effect`, `utility`, `game`, `toy`.
+- **`category`** is one or more of `instrument`, `source`, `effect`, `utility`, `game`. `source` means the tapp is an audio source the tapedecks can record, rather than a standalone app that takes over the tape engine — it combines with the others.
 - **`tags`** up to 6, lowercase. **`license`** optional but appreciated.
 - Two more keys if you need them: **`build`** names your sources explicitly (`"src/app.c src/audio.c"`)
   for when pointing `tapp-build` at the repo is not enough, and **`screenshot_frames`** sets how many

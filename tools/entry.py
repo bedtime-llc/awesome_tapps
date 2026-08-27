@@ -22,7 +22,7 @@ import re
 import sys
 from pathlib import Path
 
-CATEGORIES = ('instrument', 'effect', 'utility', 'game', 'toy')
+CATEGORIES = ('instrument', 'source', 'effect', 'utility', 'game')
 
 REQUIRED = ('name', 'author', 'repo', 'category', 'description')
 # `ref` is optional: leave it out and the build takes the repo's default branch. Submissions never
@@ -139,11 +139,11 @@ def validate(path, raw, lines=None):
 
     field = {k: text(k) for k in ('name', 'author', 'repo', 'ref', 'description',
                                   'license', 'build')}
-    field['category'] = text('category').lower()
 
     for key in REQUIRED:
         # A mistyped key already has a better error than "missing" against its name.
-        if not field[key] and key not in mistyped:
+        # `category` is a list now and is checked with the rest of its validation below.
+        if key != 'category' and not field[key] and key not in mistyped:
             errors.append(f"{path}: missing required key {key!r}")
 
     name = field['name']
@@ -171,12 +171,27 @@ def validate(path, raw, lines=None):
              f"ref {ref!r} does not look like a tag (e.g. v1.2.0) or a 40-character commit sha")
     entry['ref'] = ref
 
-    category = field['category']
-    if category and category not in CATEGORIES:
-        hint = difflib.get_close_matches(category, CATEGORIES, n=1, cutoff=0.5)
-        suffix = f" (did you mean {hint[0]!r}?)" if hint else ''
+    # A list, because the axes are independent: `source` says how a tapp runs on the device,
+    # `instrument`/`effect`/... say what it is for, and a tapp is routinely both. Shaped exactly
+    # like tags below — a bare string is comma-split as leniency for a hand-written entry.
+    category = raw.get('category', [])
+    if isinstance(category, str):
+        category = category.split(',')
+    if not isinstance(category, list) or not all(isinstance(c, str) for c in category):
         _err(errors, path, lines, 'category',
-             f"category {category!r} is not one of {', '.join(CATEGORIES)}{suffix}")
+             'category must be an array of strings, e.g. ["instrument", "source"]')
+        category = []
+    category = [c.strip().lower() for c in category if c.strip()]
+    # Dedup, order-preserving: the form cannot produce a repeat, a hand-written entry can.
+    category = list(dict.fromkeys(category))
+    if not category and 'category' not in mistyped:
+        errors.append(f"{path}: missing required key 'category'")
+    for c in category:
+        if c not in CATEGORIES:
+            hint = difflib.get_close_matches(c, CATEGORIES, n=1, cutoff=0.5)
+            suffix = f" (did you mean {hint[0]!r}?)" if hint else ''
+            _err(errors, path, lines, 'category',
+                 f"category {c!r} is not one of {', '.join(CATEGORIES)}{suffix}")
     entry['category'] = category
 
     description = field['description']
@@ -285,7 +300,8 @@ def main():
         return 0
 
     for e in parsed:
-        print(f"ok  {e['slug']:<24} {e['category']:<11} {e['repo']}@{e['ref'] or 'HEAD'}")
+        cats = ','.join(e['category'])
+        print(f"ok  {e['slug']:<24} {cats:<22} {e['repo']}@{e['ref'] or 'HEAD'}")
     if failed:
         print(f"\n{failed} of {len(files)} entries invalid", file=sys.stderr)
         return 1

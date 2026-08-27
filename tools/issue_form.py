@@ -51,7 +51,7 @@ LABELS = {
 KEYS = {v: k for k, v in LABELS.items()}
 
 # Single-line entry keys, in the order they are asked for.
-TEXT_KEYS = ('name', 'author', 'repo', 'ref', 'category', 'description', 'license', 'build')
+TEXT_KEYS = ('name', 'author', 'repo', 'ref', 'description', 'license', 'build')
 
 HEADING_RE = re.compile(r'^#{1,6}\s+(.*?)\s*$')
 CHECK_RE = re.compile(r'^\s*[-*]\s*\[([ xX])\]\s*(.*?)\s*$')
@@ -156,7 +156,10 @@ def parse(body):
         return one_line(found.get(KEYS[key], ''))
 
     raw = {k: value(k) for k in TEXT_KEYS}
-    raw['tags'] = [t.strip() for t in value('tags').split(',') if t.strip()]
+    # Both are lists. A multi-select dropdown renders its answer into the issue body exactly like
+    # the free-text tags field does — one comma-separated line — so they parse identically.
+    for key in ('category', 'tags'):
+        raw[key] = [v.strip() for v in value(key).split(',') if v.strip()]
 
     # A digit string becomes a number so the entry file is canonical JSON; anything else is left
     # exactly as typed, so entry.validate() can quote it back at the author.

@@ -70,12 +70,15 @@ body:
     id: category
     attributes:
       label: Category
+      description: >-
+        Pick as many as fit. Choose "source" if your tapp is acts as audio source.
+      multiple: true
       options:
         - instrument
+        - source
         - effect
         - utility
         - game
-        - toy
     validations:
       required: true
 

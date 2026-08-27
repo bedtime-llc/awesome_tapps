@@ -98,7 +98,7 @@ MINIMAL = '\n'.join([
     '',
     '### Category',
     '',
-    'toy',
+    'utility',
     '',
     '### Description',
     '',
@@ -143,7 +143,7 @@ class Sections(unittest.TestCase):
         self.assertEqual(raw['author'], '@someone')
         self.assertEqual(raw['repo'], 'https://github.com/someone/drum-machine')
         self.assertEqual(raw['ref'], 'v1.2.0')
-        self.assertEqual(raw['category'], 'instrument')
+        self.assertEqual(raw['category'], ['instrument'])
         self.assertEqual(raw['description'], 'Eight pads, sixteen steps, swing you can feel.')
         self.assertEqual(raw['tags'], ['drums', 'Sequencer'])
         self.assertEqual(raw['license'], 'MIT')
@@ -185,13 +185,20 @@ class Injection(unittest.TestCase):
         _, extras, _ = issue_form.parse(body)
         self.assertEqual(extras['notes'], '### Controls\n\nENC spins the piece.')
 
+    def test_multi_select_category_parses_as_a_list(self):
+        # The dropdown is `multiple: true`, and GitHub renders that answer as one comma-separated
+        # line — the same shape the free-text tags field has always had.
+        body = '### Category\n\ninstrument, source\n'
+        raw, _, _ = issue_form.parse(body)
+        self.assertEqual(raw['category'], ['instrument', 'source'])
+
     def test_a_second_known_heading_is_content_not_a_boundary(self):
         # Without the first-occurrence-wins rule this truncates the notes AND could overwrite
         # the real category with 'game'.
         body = ('### Category\n\ninstrument\n\n### Notes (optional)\n\n'
                 'see below\n\n### Category\n\ngame\n')
         raw, extras, warnings = issue_form.parse(body)
-        self.assertEqual(raw['category'], 'instrument')
+        self.assertEqual(raw['category'], ['instrument'])
         self.assertIn('### Category', extras['notes'])
         self.assertIn('game', extras['notes'])
         self.assertEqual(len(warnings), 1)

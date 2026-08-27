@@ -1,0 +1,15 @@
+{
+  "name": "grooves",
+  "author": "bedtime-llc",
+  "repo": "https://github.com/bedtime-llc/tape_sdk",
+  "ref": "a9cae67124f4209833e3f63c1cd97b11a8f73070",
+  "category": [
+    "source"
+  ],
+  "description": "generative groovebox example",
+  "tags": [
+    "drums",
+    "sequencer"
+  ],
+  "build": "examples/grooves/grooves.c"
+}

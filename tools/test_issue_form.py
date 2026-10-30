@@ -40,10 +40,6 @@ FULL = '\r\n'.join([
     '',
     'v1.2.0',
     '',
-    '### Category',
-    '',
-    'instrument',
-    '',
     '### Description',
     '',
     'Eight pads, sixteen steps, swing you can feel.',
@@ -96,10 +92,6 @@ MINIMAL = '\n'.join([
     '',
     '_No response_',
     '',
-    '### Category',
-    '',
-    'utility',
-    '',
     '### Description',
     '',
     'Does one thing.',
@@ -143,7 +135,8 @@ class Sections(unittest.TestCase):
         self.assertEqual(raw['author'], '@someone')
         self.assertEqual(raw['repo'], 'https://github.com/someone/drum-machine')
         self.assertEqual(raw['ref'], 'v1.2.0')
-        self.assertEqual(raw['category'], ['instrument'])
+        # No 'category': the tapp's role is read from the built artifact, never from the form.
+        self.assertNotIn('category', raw)
         self.assertEqual(raw['description'], 'Eight pads, sixteen steps, swing you can feel.')
         self.assertEqual(raw['tags'], ['drums', 'Sequencer'])
         self.assertEqual(raw['license'], 'MIT')
@@ -160,7 +153,7 @@ class Sections(unittest.TestCase):
         # dump() drops empties, so absence here is what keeps them out of the entry file.
         for key in ('ref', 'tags', 'license', 'build', 'screenshot_frames'):
             self.assertNotIn(key, raw, f"{key} should not survive `_No response_`")
-        self.assertEqual(set(raw), {'name', 'author', 'repo', 'category', 'description'})
+        self.assertEqual(set(raw), {'name', 'author', 'repo', 'description'})
         self.assertEqual(extras['slug'], '')
         self.assertEqual(extras['notes'], '')
         self.assertEqual(extras['confirmations'][1], (False, 'It builds with the current SDK'))
@@ -185,31 +178,30 @@ class Injection(unittest.TestCase):
         _, extras, _ = issue_form.parse(body)
         self.assertEqual(extras['notes'], '### Controls\n\nENC spins the piece.')
 
-    def test_multi_select_category_parses_as_a_list(self):
-        # The dropdown is `multiple: true`, and GitHub renders that answer as one comma-separated
-        # line — the same shape the free-text tags field has always had.
-        body = '### Category\n\ninstrument, source\n'
+    def test_comma_separated_tags_parse_as_a_list(self):
+        # The only list-valued field left. GitHub renders a free-text answer as one line.
+        body = '### Tags (optional)\n\ndrums, sequencer\n'
         raw, _, _ = issue_form.parse(body)
-        self.assertEqual(raw['category'], ['instrument', 'source'])
+        self.assertEqual(raw['tags'], ['drums', 'sequencer'])
 
     def test_a_second_known_heading_is_content_not_a_boundary(self):
         # Without the first-occurrence-wins rule this truncates the notes AND could overwrite
-        # the real category with 'game'.
-        body = ('### Category\n\ninstrument\n\n### Notes (optional)\n\n'
-                'see below\n\n### Category\n\ngame\n')
+        # the real license with 'GPL-3.0'.
+        body = ('### License (optional)\n\nMIT\n\n### Notes (optional)\n\n'
+                'see below\n\n### License (optional)\n\nGPL-3.0\n')
         raw, extras, warnings = issue_form.parse(body)
-        self.assertEqual(raw['category'], ['instrument'])
-        self.assertIn('### Category', extras['notes'])
-        self.assertIn('game', extras['notes'])
+        self.assertEqual(raw['license'], 'MIT')
+        self.assertIn('### License', extras['notes'])
+        self.assertIn('GPL-3.0', extras['notes'])
         self.assertEqual(len(warnings), 1)
 
     def test_line_separator_cannot_forge_a_heading(self):
         # str.splitlines() breaks on U+2028; str.split('\n') does not. If this parser used the
-        # former, the category below would be read as a section of its own.
-        body = '### Name\n\nX ### Category  game\n'
+        # former, the license below would be read as a section of its own.
+        body = '### Name\n\nX  ### License (optional)  GPL-3.0\n'
         raw, _, _ = issue_form.parse(body)
-        self.assertNotIn('category', raw)
-        self.assertIn('Category', raw['name'])
+        self.assertNotIn('license', raw)
+        self.assertIn('License', raw['name'])
 
     def test_shell_metacharacters_survive_as_literal_text(self):
         body = '### Name\n\n$(id) `whoami` && rm -rf /\n'

@@ -22,9 +22,10 @@ import re
 import sys
 from pathlib import Path
 
-CATEGORIES = ('instrument', 'source', 'effect', 'utility', 'game')
-
-REQUIRED = ('name', 'author', 'repo', 'category', 'description')
+# `category` is NOT here, and is not an entry key at all: it is the tapp's ROLE, read out of the
+# built artifact's manifest by build_entry.app_role(). Asking for it made it possible to publish a
+# listing that disagreed with the binary it linked to.
+REQUIRED = ('name', 'author', 'repo', 'description')
 # `ref` is optional: leave it out and the build takes the repo's default branch. Submissions never
 # do — submit_entry.py resolves a blank version field to the last commit's sha and writes that.
 OPTIONAL = ('ref', 'tags', 'license', 'build', 'screenshot_frames')
@@ -32,7 +33,7 @@ KNOWN = REQUIRED + OPTIONAL
 # The on-disk key order, so a bot write and a hand edit produce the same file and diffs stay small.
 # Spelled out rather than derived from REQUIRED + OPTIONAL: `ref` reads as part of `repo`, and an
 # entry is something a reviewer skims.
-ORDER = ('name', 'author', 'repo', 'ref', 'category', 'description',
+ORDER = ('name', 'author', 'repo', 'ref', 'description',
          'tags', 'license', 'build', 'screenshot_frames')
 
 MAX_DESCRIPTION = 200
@@ -133,6 +134,12 @@ def validate(path, raw, lines=None):
         _err(errors, path, lines, 'slug', "slug comes from the filename; remove it")
 
     for key in sorted(set(raw) - set(KNOWN) - {'slug'}):
+        if key == 'category':
+            # Worth its own sentence: every entry carried this until the role became derived, so
+            # "unknown key" would read as a bug to anyone copying an older example.
+            _err(errors, path, lines, key,
+                 "category is derived from the built tapp's manifest; remove this line")
+            continue
         hint = difflib.get_close_matches(key, KNOWN, n=1, cutoff=0.6)
         suffix = f" (did you mean {hint[0]!r}?)" if hint else ''
         _err(errors, path, lines, key, f"unknown key {key!r}{suffix}")
@@ -142,8 +149,7 @@ def validate(path, raw, lines=None):
 
     for key in REQUIRED:
         # A mistyped key already has a better error than "missing" against its name.
-        # `category` is a list now and is checked with the rest of its validation below.
-        if key != 'category' and not field[key] and key not in mistyped:
+        if not field[key] and key not in mistyped:
             errors.append(f"{path}: missing required key {key!r}")
 
     name = field['name']
@@ -170,29 +176,6 @@ def validate(path, raw, lines=None):
         _err(errors, path, lines, 'ref',
              f"ref {ref!r} does not look like a tag (e.g. v1.2.0) or a 40-character commit sha")
     entry['ref'] = ref
-
-    # A list, because the axes are independent: `source` says how a tapp runs on the device,
-    # `instrument`/`effect`/... say what it is for, and a tapp is routinely both. Shaped exactly
-    # like tags below — a bare string is comma-split as leniency for a hand-written entry.
-    category = raw.get('category', [])
-    if isinstance(category, str):
-        category = category.split(',')
-    if not isinstance(category, list) or not all(isinstance(c, str) for c in category):
-        _err(errors, path, lines, 'category',
-             'category must be an array of strings, e.g. ["instrument", "source"]')
-        category = []
-    category = [c.strip().lower() for c in category if c.strip()]
-    # Dedup, order-preserving: the form cannot produce a repeat, a hand-written entry can.
-    category = list(dict.fromkeys(category))
-    if not category and 'category' not in mistyped:
-        errors.append(f"{path}: missing required key 'category'")
-    for c in category:
-        if c not in CATEGORIES:
-            hint = difflib.get_close_matches(c, CATEGORIES, n=1, cutoff=0.5)
-            suffix = f" (did you mean {hint[0]!r}?)" if hint else ''
-            _err(errors, path, lines, 'category',
-                 f"category {c!r} is not one of {', '.join(CATEGORIES)}{suffix}")
-    entry['category'] = category
 
     description = field['description']
     if len(description) > MAX_DESCRIPTION:
@@ -300,8 +283,8 @@ def main():
         return 0
 
     for e in parsed:
-        cats = ','.join(e['category'])
-        print(f"ok  {e['slug']:<24} {cats:<22} {e['repo']}@{e['ref'] or 'HEAD'}")
+        # No category column: the role is not known until the tapp is built.
+        print(f"ok  {e['slug']:<24} {e['repo']}@{e['ref'] or 'HEAD'}")
     if failed:
         print(f"\n{failed} of {len(files)} entries invalid", file=sys.stderr)
         return 1

@@ -3,9 +3,6 @@
   "author": "bedtime-llc",
   "repo": "https://github.com/bedtime-llc/tape_sdk",
   "ref": "fd15dbe216e73531abdf0e37b69bf4e4524b76ce",
-  "category": [
-    "instrument"
-  ],
   "description": "simple recorder example",
   "tags": [
     "recorder"

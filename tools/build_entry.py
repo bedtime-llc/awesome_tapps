@@ -19,6 +19,7 @@ import os
 import re
 import shlex
 import shutil
+import struct
 import subprocess
 import sys
 import tempfile
@@ -29,6 +30,91 @@ from entry import EntryError, load  # noqa: E402
 
 SDK_REPO = 'https://github.com/bedtime-llc/tape_sdk'
 SHA_RE = re.compile(r'^[0-9a-f]{40}$')
+
+# The tapp's ROLE, as the firmware's tapp_app_type_t numbers it. This is the catalog's `category`:
+# read off the artifact, never asked of the submitter, so a listing cannot disagree with the binary
+# it links to.
+APP_TYPE = {0: 'utility', 1: 'source', 2: 'standalone'}
+
+MANIFEST_SECTION = b'.tapp_manifest'
+MANIFEST_MAGIC = 0x50504154  # "TAPP"
+MANIFEST_VERSION = 1
+SHT_NOBITS = 8
+SHDR_SIZE = 40  # sizeof(Elf32_Shdr)
+
+
+class ManifestError(Exception):
+    """The artifact compiled but its manifest will not read — a gate, not a crash.
+
+    Its own type rather than EntryError: those are all `path:line: message` about a submitted
+    file, and submit_entry.py strips that prefix off them. This is about a built binary.
+    """
+
+
+def _sections(blob):
+    """Yield (name, sh_type, sh_offset, sh_size) for each section of an ELF32 LE image."""
+    if len(blob) < 52 or blob[:4] != b'\x7fELF':
+        raise ManifestError('not an ELF file')
+    if blob[4] != 1 or blob[5] != 1:  # EI_CLASS=ELFCLASS32, EI_DATA=ELFDATA2LSB
+        raise ManifestError('not a 32-bit little-endian ELF')
+    e_shoff, = struct.unpack_from('<I', blob, 0x20)
+    e_shentsize, e_shnum, e_shstrndx = struct.unpack_from('<HHH', blob, 0x2e)
+    if not e_shoff or not e_shnum or e_shentsize != SHDR_SIZE or e_shstrndx >= e_shnum:
+        raise ManifestError('no usable section-header table')
+    if e_shoff + e_shnum * e_shentsize > len(blob):
+        raise ManifestError('section-header table runs past the end of the file')
+
+    def hdr(i):  # sh_name, sh_type, sh_flags, sh_addr, sh_offset, sh_size
+        return struct.unpack_from('<IIIIII', blob, e_shoff + i * e_shentsize)
+
+    _, _, _, _, str_off, str_size = hdr(e_shstrndx)
+    strtab = blob[str_off:str_off + str_size]
+    for i in range(e_shnum):
+        sh_name, sh_type, _, _, sh_off, sh_size = hdr(i)
+        if sh_name >= len(strtab):  # tapp_api.c guards its name lookup the same way
+            continue
+        end = strtab.find(b'\0', sh_name)
+        yield strtab[sh_name:end if end >= 0 else None], sh_type, sh_off, sh_size
+
+
+def app_role(blob):
+    """The role declared in a built .tapp: 'utility', 'source' or 'standalone'.
+
+    Located by SECTION NAME, the way both real readers do it — the device's tapp_read_manifest()
+    and the emulator's loader each walk the section table for ".tapp_manifest". The de-facto file
+    offset 0x42 holds only because tapp-build links the generated manifest object first, so the
+    section lands right after the 52-byte ELF header: that is link order, not format. Scanning the
+    bytes for the magic instead would also misfire on a tapp that happens to contain "TAPP" in its
+    rodata ahead of the manifest.
+
+    Layout from the section start: +0 magic, +4 manifest_version, +8 api_major, +10 api_minor,
+    +12 hardware_target_id, +14 app_type.
+
+    Raises rather than guessing. A manifest that will not read is one the firmware would refuse to
+    load too (tapp.c rejects app_type > AppTypeStandalone), so publishing it as 'utility' would
+    ship a download the hardware rejects — and a wrong badge, once published, is permanent.
+    """
+    for name, sh_type, off, size in _sections(blob):
+        if name != MANIFEST_SECTION:
+            continue
+        if sh_type == SHT_NOBITS:
+            raise ManifestError('.tapp_manifest has no bytes in the file (SHT_NOBITS)')
+        if size < 16 or off + 16 > len(blob):
+            raise ManifestError(f".tapp_manifest is {size} bytes, too short for a manifest header")
+        magic, version = struct.unpack_from('<II', blob, off)
+        if magic != MANIFEST_MAGIC:
+            raise ManifestError(f".tapp_manifest magic is {magic:#010x}, expected "
+                                f"{MANIFEST_MAGIC:#010x}")
+        if version != MANIFEST_VERSION:
+            raise ManifestError(f"manifest version {version}, this catalog reads {MANIFEST_VERSION}")
+        ordinal, = struct.unpack_from('<H', blob, off + 14)
+        if ordinal not in APP_TYPE:
+            known = ', '.join(f"{k}={v}" for k, v in sorted(APP_TYPE.items()))
+            raise ManifestError(
+                f"manifest declares app_type {ordinal}; this catalog knows {known}. Built against "
+                f"a newer SDK than the registry — the device would refuse it too")
+        return APP_TYPE[ordinal]
+    raise ManifestError('no .tapp_manifest section in the built artifact')
 
 
 def run(cmd, cwd=None, quiet=False):
@@ -143,8 +229,18 @@ def main():
             return 1
 
         blob = out_tapp.read_bytes()
+        try:
+            category = app_role(blob)
+        except ManifestError as e:
+            # Same contract as the no-artifact branch above: a build that failed a gate leaves
+            # nothing behind, or CI's upload-artifact step publishes a rejected .tapp.
+            out_tapp.unlink(missing_ok=True)
+            print(f"\nerror: {out_tapp.name}: {e}", file=sys.stderr)
+            return 1
+
         record = dict(entry)
         record.update({
+            'category': category,
             'commit': sha,
             'size': len(blob),
             'sha256': hashlib.sha256(blob).hexdigest(),

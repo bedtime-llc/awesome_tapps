@@ -38,7 +38,8 @@ LABELS = {
     'author': 'author',
     'repository': 'repo',
     'version': 'ref',
-    'category': 'category',
+    # No `category`: the tapp's role is read out of the built artifact (build_entry.app_role),
+    # so the form does not ask and check_form() below must not find a field labelled it.
     'description': 'description',
     'tags': 'tags',
     'license': 'license',
@@ -74,7 +75,7 @@ def lines(body):
     """Split on real newlines only.
 
     Deliberately not str.splitlines(), which also breaks on U+2028, U+2029, \\x0b and \\x0c — a body
-    could then smuggle a `### Category` into the middle of a line and move a section boundary.
+    could then smuggle a `### License` into the middle of a line and move a section boundary.
     The webhook delivers CRLF, so both endings are normalised first.
     """
     return (body or '').replace('\r\n', '\n').replace('\r', '\n').split('\n')
@@ -97,7 +98,7 @@ def sections(body):
     Two rules keep a contributor's own markdown from moving a section boundary:
 
       * a heading is a boundary only if this parser knows the label — `### Controls` is prose;
-      * only the FIRST occurrence of a known label is a boundary — someone pasting `### Category`
+      * only the FIRST occurrence of a known label is a boundary — someone pasting `### License`
         into their notes must not be able to truncate their own answer, or overwrite an earlier one.
 
     Anything before the first known heading is dropped, which is where GitHub puts nothing.
@@ -156,10 +157,7 @@ def parse(body):
         return one_line(found.get(KEYS[key], ''))
 
     raw = {k: value(k) for k in TEXT_KEYS}
-    # Both are lists. A multi-select dropdown renders its answer into the issue body exactly like
-    # the free-text tags field does — one comma-separated line — so they parse identically.
-    for key in ('category', 'tags'):
-        raw[key] = [v.strip() for v in value(key).split(',') if v.strip()]
+    raw['tags'] = [v.strip() for v in value('tags').split(',') if v.strip()]
 
     # A digit string becomes a number so the entry file is canonical JSON; anything else is left
     # exactly as typed, so entry.validate() can quote it back at the author.

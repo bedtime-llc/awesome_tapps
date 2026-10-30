@@ -22,7 +22,10 @@ def render(rec):
     if rec.get('ref') and rec['ref'] != rec['commit']:
         source = f"- source: {rec['repo']} @ `{rec['ref']}` (`{rec['commit'][:8]}`)"
     out = [
-        f"**{rec['name']}** by {rec['author']} — {rec['category']}",
+        # `category` is stamped by build_entry from the artifact's manifest. .get() because this
+        # renders under `if: always()`, and a half-written record should not turn a build report
+        # into a KeyError.
+        f"**{rec['name']}** by {rec['author']} — {rec.get('category', '?')}",
         '',
         f"> {rec['description']}",
         '',

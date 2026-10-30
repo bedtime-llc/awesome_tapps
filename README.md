@@ -41,7 +41,6 @@ published.
 | Author | required | Your name or GitHub handle |
 | Repository | required | Public GitHub URL |
 | Version | optional | A release tag or a commit sha. Blank uses your last commit |
-| Category | required | One or more of `instrument`, `source`, `effect`, `utility`, `game` |
 | Description | required | One line, max 200 chars |
 | Tags | optional | Up to 6, comma separated, lowercase |
 | License | optional | e.g. `MIT` |
@@ -66,16 +65,27 @@ An entry is one JSON file, `tapps/<id>.json`:
   "author": "someone",
   "repo": "https://github.com/someone/drum-machine",
   "ref": "v1.2.0",
-  "category": ["instrument", "source"],
   "description": "Eight pads, sixteen steps.",
   "tags": ["drums", "sequencer"],
   "license": "MIT"
 }
 ```
 
-Only `name`, `author`, `repo`, `category` and `description` are required. `ref` may be a tag or a
+Only `name`, `author`, `repo` and `description` are required. `ref` may be a tag or a
 40-character sha; leave it out and the build takes the repo's default branch, recording whichever
-commit that was. Check it before you push:
+commit that was.
+
+There is no `category` key. A tapp's category is its **role**, which it already declares in its own
+source with `TAPP_DECLARE_TYPE` — CI reads it back out of the `.tapp` it just built and publishes
+that, so a listing cannot disagree with the binary it links to. The three roles are:
+
+| role | declared as | what it means |
+|---|---|---|
+| `utility` | nothing — the default | A game or tool. Owns every button and exits itself |
+| `source` | `TAPP_DECLARE_TYPE(AppTypeSrc)` | An audio source the tapedecks can record |
+| `standalone` | `TAPP_DECLARE_TYPE(AppTypeStandalone)` | Replaces the tape engine as the main app |
+
+Check your entry before you push:
 
 ```sh
 python3 tools/entry.py --check tapps/

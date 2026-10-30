@@ -66,21 +66,13 @@ body:
     validations:
       required: false
 
-  - type: dropdown
-    id: category
+  - type: markdown
     attributes:
-      label: Category
-      description: >-
-        Pick as many as fit. Choose "source" if your tapp is acts as audio source.
-      multiple: true
-      options:
-        - instrument
-        - source
-        - effect
-        - utility
-        - game
-    validations:
-      required: true
+      value: |
+        There is no category to pick. The catalog reads your tapp's **role** out of the `.tapp` it
+        builds — `utility` (declare nothing), `source` (`TAPP_DECLARE_TYPE(AppTypeSrc)`) or
+        `standalone` (`TAPP_DECLARE_TYPE(AppTypeStandalone)`) — so the listing can never disagree
+        with the binary. See the [roles table](../blob/main/README.md#hand-writing-an-entry).
 
   - type: input
     id: description

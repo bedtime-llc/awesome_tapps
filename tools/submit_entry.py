@@ -236,10 +236,9 @@ def submit(body, user, issue, catalog, out_dir):
 
     # Canonicalised here rather than left to entry.validate(), which only normalises on the way out
     # to the catalog. The committed file is what a reviewer reads, so it should already be the
-    # thing that gets published — no "Instrument" in the diff becoming "instrument" on the site.
+    # thing that gets published — no "Drums" in the diff becoming "drums" on the site.
     raw['repo'] = canonical_repo(raw.get('repo'))
     raw['author'] = raw.get('author', '').lstrip('@')
-    raw['category'] = raw.get('category', '')
     raw['tags'] = [t.lower() for t in raw.get('tags', [])]
     raw['ref'], note = resolve(raw['repo'], raw.get('ref'))
 
